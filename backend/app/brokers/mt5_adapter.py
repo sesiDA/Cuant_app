@@ -47,7 +47,60 @@ class MT5Adapter(BaseBrokerAdapter):
             return True
         
         return await asyncio.to_thread(_verify)
+    
+    async def fetch_historical_data(self, symbol: str, timeframe: str, amount: int, unit: str, progress_callback: Callable) -> list:
+        tf_code = self.TF_MAP.get(timeframe)
+        if not tf_code:
+            raise ValueError(f"Temporalidad {timeframe} no soportada")
 
+        exists = await self.verify_symbol(symbol)
+        if not exists:
+            raise ValueError(f"El mercado '{symbol}' no existe")
+
+        # 1. Convertir unidad a segundos totales solicitados
+        unit_secs = {"m": 60, "h": 3600, "d": 86400, "w": 604800, "mo": 2592000, "y": 31536000}
+        total_requested_secs = amount * unit_secs.get(unit, 86400)
+        
+        # 2. Calcular cuántas velas equivalen a esos segundos
+        tf_secs = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "1d": 86400}.get(timeframe, 60)
+        total_candles = max(1, int(total_requested_secs / tf_secs))
+
+        # 3. Extracción por Chunks (Bloques de 20.000 velas) para la barra de progreso
+        chunk_size = 20000
+        chunks = total_candles // chunk_size + (1 if total_candles % chunk_size else 0)
+        all_rates = []
+
+        for i in range(chunks):
+            start_pos = i * chunk_size
+            count = min(chunk_size, total_candles - start_pos)
+            
+            def _fetch():
+                # Obtenemos desde el presente hacia el pasado
+                return mt5.copy_rates_from_pos(symbol, tf_code, start_pos, count)
+            
+            rates = await asyncio.to_thread(_fetch)
+            if rates is not None and len(rates) > 0:
+                all_rates.extend(rates)
+            
+            # Notificamos el progreso al frontend
+            pct = min(100, int(((i + 1) / chunks) * 100))
+            await progress_callback(pct)
+
+        # 4. Formatear y asegurar orden cronológico absoluto
+        formatted = []
+        for rate in all_rates:
+            formatted.append({
+                "time": int(rate['time']),
+                "open": float(rate['open']), "high": float(rate['high']),
+                "low": float(rate['low']), "close": float(rate['close']),
+                "volume": int(rate['tick_volume'])
+            })
+            
+        formatted.sort(key=lambda x: x['time'])
+        
+        unique_formatted = {item['time']: item for item in formatted}.values()
+        return list(unique_formatted)
+    
     async def fetch_latest_candle(self, symbol: str, timeframe: str) -> dict:
         tf_code = self.TF_MAP.get(timeframe)
         if not tf_code:
@@ -64,7 +117,7 @@ class MT5Adapter(BaseBrokerAdapter):
         
         # SOLUCIÓN: Convertimos explícitamente los tipos de NumPy a int y float nativos de Python
         return {
-            "time": datetime.fromtimestamp(int(rate['time'])).isoformat(),
+            "time": int(rate['time']),
             "open": float(rate['open']),
             "high": float(rate['high']),
             "low": float(rate['low']),

@@ -9,7 +9,7 @@ export default function ProviderNode({ id, data }: { id: string, data: any }) {
   const { setNodes, updateNodeData } = useReactFlow();
   const [provider, setProvider] = useState('MT5');
   const [markets, setMarkets] = useState<MarketConfig[]>([]);
-  const [nodeError, setNodeError] = useState<string | null>(null);
+  const [nodeError] = useState<string | null>(null);
   
   // NUEVO: Estado global de pausa
   const [globalPaused, setGlobalPaused] = useState(false);
@@ -22,7 +22,7 @@ export default function ProviderNode({ id, data }: { id: string, data: any }) {
   useEffect(() => {
     updateNodeData(id, { markets });
   }, [markets, id, updateNodeData]);
-  
+
   useEffect(() => {
     const interval = setInterval(() => {
       const now = Date.now();

@@ -33,7 +33,23 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             command = json.loads(data)
             action = command.get("action")
-
+            # --- COMANDO DE VERIFICACIÓN DE MERCADO ---
+            if action == "verify_symbol":
+                market_id = command.get("marketId")
+                symbol = command.get("symbol")
+                if not broker:
+                    continue
+                try:
+                    exists = await broker.verify_symbol(symbol)
+                    if not exists:
+                        await websocket.send_text(json.dumps({
+                            "type": "ERROR", "marketId": market_id, "message": f"El mercado '{symbol}' no existe"
+                        }))
+                except Exception as e:
+                    await websocket.send_text(json.dumps({
+                        "type": "ERROR", "marketId": market_id, "message": str(e)
+                    }))
+                continue
            # --- COMANDOS DE BUFFER ---
             if action == "buffer_append":
                 table_id = command.get("tableId")
@@ -43,7 +59,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 full_array = buffer_manager.append_data(table_id, new_data, db_mode)
                 await websocket.send_text(json.dumps({"type": "BUFFER_UPDATED", "tableId": table_id, "data": full_array}))
                 continue
+            elif action == "buffer_append_batch":
+                table_id = command.get("tableId")
+                new_data = command.get("data") # Esto ahora es un array
+                db_mode = command.get("mode", "LOCAL_MEM")
                 
+                # Llamamos a la nueva función masiva
+                buffer_manager.append_batch(table_id, new_data, db_mode)
+                
+                # Enviamos una confirmación ligera, no todo el DB
+                await websocket.send_text(json.dumps({
+                    "type": "BUFFER_BATCH_COMPLETE",
+                    "tableId": table_id,
+                    "count": len(new_data)
+                }))
+                continue
             elif action == "buffer_clear":
                 # ARREGLADO: Ahora se le pasa el modo correctamente para evitar el crash
                 buffer_manager.clear_table(command.get("tableId"), command.get("mode", "LOCAL_MEM"))
@@ -56,7 +86,35 @@ async def websocket_endpoint(websocket: WebSocket):
                 full_array = buffer_manager.load_table(table_id, db_mode)
                 await websocket.send_text(json.dumps({"type": "BUFFER_UPDATED", "tableId": table_id, "data": full_array}))
                 continue
+            # --- COMANDOS DE HISTÓRICOS (INYECCIÓN MASIVA) ---
+            if action == "historical_load":
+                market_id = command.get("marketId")
+                symbol = command.get("symbol")
+                timeframe = command.get("timeframe")
+                amount = int(command.get("amount", 1))
+                unit = command.get("unit", "d")
                 
+                async def send_progress(pct: int):
+                    await websocket.send_text(json.dumps({
+                        "type": "HISTORICAL_PROGRESS", "marketId": market_id, "progress": pct
+                    }))
+                    
+                try:
+                    data_array = await broker.fetch_historical_data(symbol, timeframe, amount, unit, send_progress)
+                    
+                    await websocket.send_text(json.dumps({
+                        "type": "HISTORICAL_COMPLETE",
+                        "marketId": market_id,
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "data": data_array
+                    }))
+                except Exception as e:
+                    await websocket.send_text(json.dumps({
+                        "type": "ERROR", "marketId": market_id, "message": str(e)
+                    }))
+                continue    
+            
             # --- COMANDOS DE BROKER EXISTENTES ---
             if not broker:
                 await websocket.send_text(json.dumps({"type": "GLOBAL_ERROR", "message": "MT5 no conectado."}))

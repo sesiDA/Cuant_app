@@ -57,7 +57,6 @@ quant-platform/ç
         └── types/                 # Definiciones de TypeScript para nodos y flujos 
 
 # TODO List
-    -Inyector de datos historicos
     -Añadir Command Line Node
     -Hacer preprocesador de datos 
     -Hacer nodos auxiliares: Multiplexor, Decodificador, Clock

@@ -53,10 +53,12 @@ export default function ChartNode({ id, data }: { id: string, data: any }) {
         setMarketLabel(payload.sourceId.replace('_', ' '));
       }
       if (payload.dataType === 'single') {
-        // --- CASO 1: Vela suelta (Directo del Provider) ---
         const candle = payload.data;
-        const timeSecs = Math.floor(new Date(candle.time).getTime() / 1000) as Time;
-        
+        // Parseo ultrarrápido: Si ya es un número (del inyector) lo usamos, sino lo parseamos
+        const timeSecs = typeof candle.time === 'number' 
+          ? (candle.time > 9999999999 ? Math.floor(candle.time/1000) : candle.time) 
+          : Math.floor(new Date(candle.time).getTime() / 1000);
+
         let formattedData = chartType === 'candlestick' 
           ? { time: timeSecs, open: candle.open, high: candle.high, low: candle.low, close: candle.close }
           : { time: timeSecs, value: candle.close };
@@ -64,28 +66,21 @@ export default function ChartNode({ id, data }: { id: string, data: any }) {
         seriesRef.current.update(formattedData);
 
       } else if (payload.dataType === 'accumulated') {
-        // --- CASO 2: Array de velas (Desde el Buffer) ---
         const candlesArray = payload.data as any[];
         
-        // Mapeamos el array para parsear las fechas de TODOS los elementos
+        // Mapeo ultrarrápido (Bypass de 'new Date()' si el backend envía enteros)
         let formattedArray = candlesArray.map(candle => {
-          const timeSecs = Math.floor(new Date(candle.time).getTime() / 1000) as Time;
-          if (chartType === 'candlestick') {
-            return { time: timeSecs, open: candle.open, high: candle.high, low: candle.low, close: candle.close };
-          } else {
-            return { time: timeSecs, value: candle.close };
-          }
+          const timeSecs = typeof candle.time === 'number' 
+            ? (candle.time > 9999999999 ? Math.floor(candle.time/1000) : candle.time) 
+            : Math.floor(new Date(candle.time).getTime() / 1000);
+            
+          return chartType === 'candlestick' 
+            ? { time: timeSecs as Time, open: candle.open, high: candle.high, low: candle.low, close: candle.close }
+            : { time: timeSecs as Time, value: candle.close };
         });
 
-        // TradingView falla si los datos no están estrictamente ordenados de más antiguo a más nuevo
-        formattedArray.sort((a, b) => (a.time as number) - (b.time as number));
-
-        // Borramos los duplicados de tiempo que puedan existir por latencia (TradingView no permite dos velas con el mismo exacto timestamp)
-        formattedArray = formattedArray.filter((item, index, self) =>
-          index === self.findIndex((t) => (t.time === item.time))
-        );
-
-        // Usamos setData para reemplazar todo el histórico del gráfico
+        // Ya vienen ordenados y filtrados del backend, así que comentamos o eliminamos 
+        // los costosos sort() y filter() del frontend.
         seriesRef.current.setData(formattedArray);
       }
       
@@ -99,7 +94,7 @@ export default function ChartNode({ id, data }: { id: string, data: any }) {
       width: '400px', fontFamily: 'Inter, system-ui, sans-serif',
       boxShadow: '0 10px 15px -3px rgba(56, 189, 248, 0.1)', overflow: 'hidden'
     }}>
-      <Handle type="target" position={Position.Left} id="in" style={{ background: '#38bdf8', width: '10px', height: '10px', border: '2px solid #fff', left: '-5px' }} />
+      <Handle type="target" position={Position.Left} id="in" style={{ background: '#10b981', width: '10px', height: '10px', border: '2px solid #fff', left: '-5px' }} />
       
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ fontSize: '12px', color: '#6b7280', textTransform: 'uppercase', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>

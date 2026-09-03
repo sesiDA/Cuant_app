@@ -11,10 +11,14 @@ class BaseBrokerAdapter(ABC):
         pass
 
     @abstractmethod
+    async def fetch_historical_data(self, symbol: str, timeframe: str, amount: int, unit: str, progress_callback: Callable) -> list:
+        """Extrae un volumen masivo de datos históricos."""
+        pass
+
+    @abstractmethod
     async def _market_loop(self, symbol: str, timeframe: str, callback: Callable, error_callback: Callable):
         pass
 
-    # Añadido market_id y error_callback a la firma
     def subscribe(self, market_id: str, symbol: str, timeframe: str, callback: Callable, error_callback: Callable):
         if market_id not in self.active_tasks:
             task = asyncio.create_task(self._market_loop(symbol, timeframe, callback, error_callback))

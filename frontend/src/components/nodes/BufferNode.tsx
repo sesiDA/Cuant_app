@@ -30,34 +30,40 @@ export default function BufferNode({ id, data }: { id: string, data: any }) {
     setTables([]); 
   }, [database, id, setEdges]);
 
-  // 2. RECEPCIÓN DE DATOS EN TIEMPO REAL
+  // 2. RECEPCIÓN DE DATOS (SINGLE O BATCH)
+  // 2. RECEPCIÓN DE DATOS (SINGLE O BATCH) Y PROPAGACIÓN
   useEffect(() => {
     if (globalPaused || !data?.incomingData) return;
     const payload = data.incomingData;
 
-    // BLOQUEO DE BUCLE: Si no hay msgId o ya lo procesamos, salimos inmediatamente
     if (!payload.msgId || lastProcessedRef.current === payload.msgId) return;
     lastProcessedRef.current = payload.msgId;
 
-    if (payload.dataType === 'single' && payload.targetHandle) {
+    if (payload.targetHandle) {
       const targetTableId = payload.targetHandle.replace('in-', '');
-      
-      // Leemos de la referencia (tablesRef.current) en lugar del estado (tables)
       const table = tablesRef.current.find(t => t.id === targetTableId);
       
       if (table && !table.paused) {
-        setTables(prev => prev.map(t => t.id === targetTableId ? { ...t, count: t.count + 1 } : t));
-        
-        data.wsSend?.({ 
-          action: 'buffer_append', 
-          tableId: targetTableId, 
-          mode: database, 
-          data: payload.data 
-        });
+        if (payload.dataType === 'single') {
+          setTables(prev => prev.map(t => t.id === targetTableId ? { ...t, count: t.count + 1 } : t));
+          data.wsSend?.({ action: 'buffer_append', tableId: targetTableId, mode: database, data: payload.data });
+        } 
+        else if (payload.dataType === 'accumulated') {
+          setTables(prev => prev.map(t => t.id === targetTableId ? { ...t, count: t.count + payload.data.length } : t));
+          data.wsSend?.({ action: 'buffer_append_batch', tableId: targetTableId, mode: database, data: payload.data });
+        }
+
+        // --- NUEVO: PROPAGACIÓN HACIA ADELANTE (FORWARDING) ---
+        // Despachamos un evento para que App.tsx mueva el dato al siguiente cable
+        window.dispatchEvent(new CustomEvent('forwardData', { 
+          detail: { 
+            sourceHandle: `out-${targetTableId}`, 
+            payload: payload // Pasamos el payload íntegro para que siga viajando
+          } 
+        }));
       }
     }
-  // QUITAMOS 'tables' de las dependencias. Solo dependemos de estas tres.
-  }, [data?.incomingData, globalPaused, database]); 
+  }, [data?.incomingData, globalPaused, database]);
   // 3. AUTO-DESCUBRIMIENTO EN CALIENTE (Solicitado por App.tsx al soltar el cable)
   useEffect(() => {
     if (data.autoAddRequest) {
@@ -125,7 +131,7 @@ export default function BufferNode({ id, data }: { id: string, data: any }) {
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {tables.map((table) => (
           <div key={table.id} style={{ position: 'relative', padding: '12px 16px', borderBottom: '1px solid #f3f4f6' }}>
-            <Handle type="target" position={Position.Left} id={`in-${table.id}`} style={{ background: '#38bdf8', width: '10px', height: '10px', border: '2px solid #fff', left: '-5px' }} />
+            <Handle type="target" position={Position.Left} id={`in-${table.id}`} style={{ background: '#10b981', width: '10px', height: '10px', border: '2px solid #fff', left: '-5px' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ fontWeight: '500', fontSize: '14px', color: table.paused ? '#9ca3af' : '#111827' }}>
                 {table.name} <span style={{ color: '#38bdf8', fontSize: '11px', marginLeft: '6px', fontWeight: 'bold' }}>[{table.count}]</span>
@@ -135,13 +141,13 @@ export default function BufferNode({ id, data }: { id: string, data: any }) {
                 <button onClick={() => removeTable(table.id)} style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '4px', cursor: 'pointer', padding: '4px 8px', fontSize: '12px', color: '#ef4444' }}>✕</button>
               </div>
             </div>
-            <Handle type="source" position={Position.Right} id={`out-${table.id}`} style={{ background: '#38bdf8', width: '10px', height: '10px', border: '2px solid #fff', right: '-5px' }} />
+            <Handle type="source" position={Position.Right} id={`out-${table.id}`} style={{ background: '#10b981', width: '10px', height: '10px', border: '2px solid #fff', right: '-5px' }} />
           </div>
         ))}
       </div>
       
       <div style={{ position: 'relative', padding: '12px 16px', backgroundColor: '#fafafa', borderBottom: '1px solid #f3f4f6' }}>
-        <Handle type="target" position={Position.Left} id="auto-add" style={{ background: '#8b5cf6', width: '12px', height: '12px', border: '2px solid #fff', left: '-6px' }} />
+        <Handle type="target" position={Position.Left} id="auto-add" style={{ background: '#10b981', width: '12px', height: '12px', border: '2px solid #fff', left: '-6px' }} />
         
         {isAdding ? (
           <div style={{ display: 'flex', gap: '8px', flexDirection: 'column' }}>

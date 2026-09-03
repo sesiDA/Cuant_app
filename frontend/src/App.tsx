@@ -6,6 +6,7 @@ import '@xyflow/react/dist/style.css';
 import ProviderNode from './components/nodes/ProviderNode';
 import ChartNode from './components/nodes/ChartNode';
 import BufferNode from './components/nodes/BufferNode';
+import HistoricalNode from './components/nodes/HistoricalNode';
 
 // --- CONFIGURACIÓN VISUAL DE LOS CABLES ---
 const defaultEdgeStyle = { stroke: '#cbd5e1', strokeWidth: 2 };
@@ -36,8 +37,7 @@ function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition,
     </>
   );
 }
-
-const nodeTypes = { provider: ProviderNode, chart: ChartNode, buffer: BufferNode }; 
+const nodeTypes = { provider: ProviderNode, chart: ChartNode, buffer: BufferNode, historical: HistoricalNode };
 const edgeTypes = { deletable: DeletableEdge };
 
 function FlowCanvas() {
@@ -46,7 +46,8 @@ function FlowCanvas() {
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, getNode, updateNodeData } = useReactFlow();
   const wsRef = useRef<WebSocket | null>(null);
-
+  
+  // EVENTOS DEL WEBSOCKET
   useEffect(() => {
     const ws = new WebSocket('ws://localhost:5173/ws');
     wsRef.current = ws;
@@ -135,14 +136,104 @@ function FlowCanvas() {
           return updatedEdges;
         });
       }
+      else if (payload.type === 'HISTORICAL_PROGRESS') {
+        setNodes(nds => nds.map(n => n.type === 'historical' ? { ...n, data: { ...n.data, histProgress: { id: payload.marketId, pct: payload.progress } } } : n));
+      }
       
+      else if (payload.type === 'HISTORICAL_COMPLETE') {
+        setNodes(nds => nds.map(n => n.type === 'historical' ? { ...n, data: { ...n.data, histComplete: { id: payload.marketId } } } : n));
+
+        setEdges(eds => {
+          let hasConnections = false;
+          const updatedEdges = eds.map(e => {
+            if (e.sourceHandle === `handle-${payload.marketId}`) {
+              hasConnections = true;
+              return { ...e, animated: true, style: { stroke: '#8b5cf6', strokeWidth: 3 }, markerEnd: { type: MarkerType.ArrowClosed, color: '#8b5cf6' } };
+            }
+            return e;
+          });
+
+          if (hasConnections) {
+            setNodes(nds => nds.map(n => {
+              const incomingEdge = updatedEdges.find(ce => ce.target === n.id && ce.sourceHandle === `handle-${payload.marketId}`);
+              if (incomingEdge) {
+                // Al ser muchos datos, el payload estándar ES de tipo acumulado
+                const standardPayload = {
+                  msgId: `hist_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+                  dataType: 'accumulated',
+                  sourceId: payload.symbol + '_' + payload.timeframe, // Para autodescubrimiento
+                  targetHandle: incomingEdge.targetHandle,
+                  symbol: payload.symbol,
+                  timeframe: payload.timeframe,
+                  data: payload.data
+                };
+                return { ...n, data: { ...n.data, incomingData: standardPayload } };
+              }
+              return n;
+            }));
+            
+            setTimeout(() => {
+              setEdges(currentEdges => currentEdges.map(e => e.sourceHandle === `handle-${payload.marketId}` ? { ...e, animated: false, style: defaultEdgeStyle, markerEnd: defaultMarker } : e));
+            }, 3000); // Animación lila más duradera para inyecciones masivas
+          }
+          return updatedEdges;
+        });
+      }
+      // Actualiza también el recolector de errores para que notifique al inyector histórico
       else if (payload.type === 'ERROR') {
-        setNodes(nds => nds.map(n => n.type === 'provider' ? { ...n, data: { ...n.data, marketError: { id: payload.marketId, message: payload.message } } } : n));
+        setNodes(nds => nds.map(n => (n.type === 'provider' || n.type === 'historical') ? { ...n, data: { ...n.data, marketError: { id: payload.marketId, message: payload.message } } } : n));
       }
     };
     return () => ws.close();
   }, [setNodes, setEdges]);
+  // BUS DE EVENTOS FRONT-TO-FRONT 
+  useEffect(() => {
+    const handleForward = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const { sourceHandle, payload } = customEvent.detail;
 
+      setEdges(eds => {
+        let hasConnections = false;
+        const updatedEdges = eds.map(edge => {
+          if (edge.sourceHandle === sourceHandle) {
+            hasConnections = true;
+            // Adaptamos el color según el tipo de dato que se está propagando
+            const activeColor = payload.dataType === 'accumulated' ? '#8b5cf6' : '#38bdf8';
+            return { 
+              ...edge, animated: true, style: { stroke: activeColor, strokeWidth: 3 }, 
+              markerEnd: { type: MarkerType.ArrowClosed, color: activeColor } 
+            };
+          }
+          return edge;
+        });
+
+        if (hasConnections) {
+          setNodes(nds => nds.map(n => {
+            const incomingEdge = updatedEdges.find(ce => ce.target === n.id && ce.sourceHandle === sourceHandle);
+            if (incomingEdge) {
+              // Preparamos el payload con el handle de destino correcto
+              const standardPayload = { ...payload, targetHandle: incomingEdge.targetHandle };
+              return { ...n, data: { ...n.data, incomingData: standardPayload } };
+            }
+            return n;
+          }));
+
+          // Apagamos la animación del cable al terminar
+          setTimeout(() => {
+            setEdges(currentEdges => currentEdges.map(edge => 
+              edge.sourceHandle === sourceHandle 
+                ? { ...edge, animated: false, style: defaultEdgeStyle, markerEnd: defaultMarker } 
+                : edge
+            ));
+          }, 2000);
+        }
+        return updatedEdges;
+      });
+    };
+
+    window.addEventListener('forwardData', handleForward);
+    return () => window.removeEventListener('forwardData', handleForward);
+  }, [setNodes, setEdges]);
   const onNodesChange = useCallback((changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes: any) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
@@ -198,7 +289,7 @@ function FlowCanvas() {
   );
 }
 
-// NUEVO: Barra de Herramientas Rediseñada (Minimalista y limpia)
+//Barra de herramientas flotante para arrastrar nodos al lienzo
 function Toolbar() {
   const onDragStart = (event: React.DragEvent, nodeType: string) => {
     event.dataTransfer.setData('application/reactflow', nodeType);
@@ -239,6 +330,14 @@ function Toolbar() {
         >
           Buffer de Datos
         </div>
+        <div 
+          onDragStart={(e) => onDragStart(e, 'historical')} draggable 
+          style={{ padding: '8px 24px', backgroundColor: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'grab', fontSize: '13px', fontWeight: '500', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', transition: 'all 0.2s' }}
+          onMouseOver={(e) => e.currentTarget.style.borderColor = '#9ca3af'}
+          onMouseOut={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+        >
+          Inyector Histórico
+        </div>  
       </div>
     </div>
   );

@@ -11,7 +11,7 @@ class BufferManager:
         self.data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
         os.makedirs(self.data_dir, exist_ok=True)
         self.db_path = os.path.join(self.data_dir, "buffer.db")
-
+    
     def _init_sql_table(self, table_id: str, data_keys: list):
         safe_table_id = "".join(c for c in table_id if c.isalnum() or c == "_")
         columns = []
@@ -29,7 +29,42 @@ class BufferManager:
             cursor.execute(f"CREATE TABLE IF NOT EXISTS {safe_table_id} ({columns_sql})")
             conn.commit()
         return safe_table_id
-
+    def append_batch(self, table_id: str, data_list: list, mode: str) -> list:
+        """Inserta un volumen masivo de datos de forma optimizada."""
+        if not data_list:
+            return []
+            
+        if mode == "SQL":
+            safe_table_id = self._init_sql_table(table_id, list(data_list[0].keys()))
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                placeholders = ", ".join(["?"] * len(data_list[0]))
+                columns = ", ".join(data_list[0].keys())
+                
+                # Transformamos la lista de dicts en lista de tuplas para executemany
+                values_list = [tuple(d.values()) for d in data_list]
+                
+                # INSERT OR REPLACE evita duplicados si se carga el mismo histórico dos veces
+                cursor.executemany(
+                    f"INSERT OR REPLACE INTO {safe_table_id} ({columns}) VALUES ({placeholders})", 
+                    values_list
+                )
+                conn.commit()
+                
+                # Para evitar reventar la memoria en retornos masivos, devolvemos solo la confirmación 
+                # (El frontend ya tiene el array histórico en memoria para graficarlo)
+                return [{"batch_success": True, "count": len(values_list)}]
+        else:
+            # Modo Polars
+            new_df = pl.DataFrame(data_list)
+            if table_id not in self.polars_tables:
+                self.polars_tables[table_id] = new_df
+            else:
+                self.polars_tables[table_id] = pl.concat([
+                    self.polars_tables[table_id], new_df
+                ]).unique(subset=["time"], keep="last").sort("time")
+                
+            return [{"batch_success": True, "count": len(self.polars_tables[table_id])}]
     def append_data(self, table_id: str, data: dict, mode: str) -> list:
         if mode == "SQL":
             safe_table_id = self._init_sql_table(table_id, list(data.keys()))
