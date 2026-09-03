@@ -1,0 +1,15 @@
+#Python
+backend/venv/
+backend/__pycache__/
+*.py[cod]
+*.env
+.pytest
+
+#Node/React
+frontend/node_modules
+frontend/dist/
+frontend/.env.local
+
+#IDEs
+.vscode/
+.idea/
