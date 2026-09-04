@@ -11,7 +11,59 @@ class BufferManager:
         self.data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
         os.makedirs(self.data_dir, exist_ok=True)
         self.db_path = os.path.join(self.data_dir, "buffer.db")
-    
+    def execute_console(self, mode: str, code: str):
+        # Función recursiva para sanitizar diccionarios y DataFrames anidados
+        def _serialize_polars(obj):
+            import polars as pl
+            if isinstance(obj, pl.DataFrame):
+                return obj.to_dicts()
+            elif isinstance(obj, pl.Series):
+                return obj.to_list()
+            elif isinstance(obj, dict):
+                return {str(k): _serialize_polars(v) for k, v in obj.items()}
+            elif isinstance(obj, list) or isinstance(obj, tuple):
+                return [_serialize_polars(v) for v in obj]
+            return obj
+
+        if mode == "SQL":
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(code)
+                    if code.strip().upper().startswith("SELECT"):
+                        rows = cursor.fetchall()
+                        col_names = [desc[0] for desc in cursor.description]
+                        return [dict(zip(col_names, row)) for row in rows]
+                    else:
+                        conn.commit()
+                        return [{"status": "Éxito", "rows_affected": cursor.rowcount, "mutated": True}]
+            except Exception as e:
+                return {"error": str(e)}
+                
+        elif mode == "PYTHON":
+            import io
+            import sys
+            import traceback
+            import polars as pl
+            
+            old_stdout = sys.stdout
+            redirected_output = sys.stdout = io.StringIO()
+            
+            try:
+                local_env = { "pl": pl, "tables": self.polars_tables, "result": None }
+                exec(code, {}, local_env)
+                sys.stdout = old_stdout
+                
+                out_str = redirected_output.getvalue()
+                res = local_env.get("result")
+                
+                if res is not None:
+                    return _serialize_polars(res)
+                    
+                return [{"output": out_str or "Ejecución completada sin output."}]
+            except Exception as e:
+                sys.stdout = old_stdout
+                return {"error": traceback.format_exc()}
     def _init_sql_table(self, table_id: str, data_keys: list):
         safe_table_id = "".join(c for c in table_id if c.isalnum() or c == "_")
         columns = []

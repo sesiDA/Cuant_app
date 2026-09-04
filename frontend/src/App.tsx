@@ -7,6 +7,7 @@ import ProviderNode from './components/nodes/ProviderNode';
 import ChartNode from './components/nodes/ChartNode';
 import BufferNode from './components/nodes/BufferNode';
 import HistoricalNode from './components/nodes/HistoricalNode';
+import ConsoleNode from './components/nodes/ConsoleNode';
 
 // --- CONFIGURACIÓN VISUAL DE LOS CABLES ---
 const defaultEdgeStyle = { stroke: '#cbd5e1', strokeWidth: 2 };
@@ -37,7 +38,7 @@ function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition,
     </>
   );
 }
-const nodeTypes = { provider: ProviderNode, chart: ChartNode, buffer: BufferNode, historical: HistoricalNode };
+const nodeTypes = { provider: ProviderNode, chart: ChartNode, buffer: BufferNode, historical: HistoricalNode, console: ConsoleNode };
 const edgeTypes = { deletable: DeletableEdge };
 
 function FlowCanvas() {
@@ -92,8 +93,7 @@ function FlowCanvas() {
           }
           return updatedEdges;
         });
-      } 
-      else if (payload.type === 'BUFFER_UPDATED') {
+      } else if (payload.type === 'BUFFER_UPDATED') {
         setEdges(eds => {
           let hasConnections = false;
           const updatedEdges = eds.map(e => {
@@ -135,12 +135,9 @@ function FlowCanvas() {
           }
           return updatedEdges;
         });
-      }
-      else if (payload.type === 'HISTORICAL_PROGRESS') {
+      } else if (payload.type === 'HISTORICAL_PROGRESS') {
         setNodes(nds => nds.map(n => n.type === 'historical' ? { ...n, data: { ...n.data, histProgress: { id: payload.marketId, pct: payload.progress } } } : n));
-      }
-      
-      else if (payload.type === 'HISTORICAL_COMPLETE') {
+      } else if (payload.type === 'HISTORICAL_COMPLETE') {
         setNodes(nds => nds.map(n => n.type === 'historical' ? { ...n, data: { ...n.data, histComplete: { id: payload.marketId } } } : n));
 
         setEdges(eds => {
@@ -178,14 +175,35 @@ function FlowCanvas() {
           }
           return updatedEdges;
         });
-      }
-      // Actualiza también el recolector de errores para que notifique al inyector histórico
-      else if (payload.type === 'ERROR') {
+      }else if (payload.type === 'CONSOLE_RESULT') {
+        // 1. Iluminar el cable desde el Buffer hasta la Consola
+        setEdges(eds => eds.map(e => (e.source === payload.bufferId && e.target === payload.nodeId) ? { ...e, animated: true, style: activeEdgeStyle, markerEnd: activeMarker } : e));
+        
+        setTimeout(() => {
+          setEdges(eds => eds.map(e => (e.source === payload.bufferId && e.target === payload.nodeId) ? { ...e, animated: false, style: defaultEdgeStyle, markerEnd: defaultMarker } : e));
+        }, 2000);
+
+        // 2. Inyectar el dato en la Consola
+        setNodes(nds => {
+          let refreshNeeded = false;
+          if (Array.isArray(payload.result) && payload.result.length > 0 && payload.result[0].mutated) refreshNeeded = true;
+          
+          return nds.map(n => {
+            if (n.id === payload.nodeId) {
+              const standardPayload = { msgId: `c_res_${Date.now()}`, dataType: 'console_result', data: payload.result };
+              return { ...n, data: { ...n.data, incomingData: standardPayload } };
+            }
+            if (refreshNeeded && n.type === 'buffer') return { ...n, data: { ...n.data, refreshTrigger: Date.now() } };
+            return n;
+          });
+        });
+      } else if (payload.type === 'ERROR') {
         setNodes(nds => nds.map(n => (n.type === 'provider' || n.type === 'historical') ? { ...n, data: { ...n.data, marketError: { id: payload.marketId, message: payload.message } } } : n));
       }
     };
     return () => ws.close();
   }, [setNodes, setEdges]);
+  
   // BUS DE EVENTOS FRONT-TO-FRONT 
   useEffect(() => {
     const handleForward = (e: Event) => {
@@ -237,6 +255,25 @@ function FlowCanvas() {
   const onNodesChange = useCallback((changes: any) => setNodes((nds) => applyNodeChanges(changes, nds)), []);
   const onEdgesChange = useCallback((changes: any) => setEdges((eds) => applyEdgeChanges(changes, eds)), []);
 
+  const onEdgesDelete = useCallback((deletedEdges: Edge[]) => {
+    // 1. Apagar la transmisión del backend si se corta el cable de un proveedor
+    deletedEdges.forEach(edge => {
+      if (edge.sourceHandle?.startsWith('handle-')) {
+        const marketId = edge.sourceHandle.replace('handle-', '');
+        wsRef.current?.send(JSON.stringify({ action: 'unsubscribe', marketId }));
+      }
+    });
+
+    // 2. Limpiar el puerto de destino para que el nodo sepa que ya no recibe datos
+    setNodes(nds => nds.map(n => {
+      if (deletedEdges.some(e => e.target === n.id)) {
+        const newData = { ...n.data };
+        delete newData.incomingData;
+        return { ...n, data: newData };
+      }
+      return n;
+    }));
+  }, [setNodes]);
   const onConnect = useCallback((connection: Connection) => {
     let modifiedConnection = { ...connection };
 
@@ -279,7 +316,7 @@ function FlowCanvas() {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative', fontFamily: 'Inter, system-ui, sans-serif' }} ref={reactFlowWrapper}>
-      <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onDrop={onDrop} onDragOver={onDragOver} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView>
+      <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onEdgesDelete={onEdgesDelete} onConnect={onConnect} onDrop={onDrop} onDragOver={onDragOver} nodeTypes={nodeTypes} edgeTypes={edgeTypes} fitView>
         <Background gap={16} color="#e5e7eb" />
         {/* NUEVO: Controles desplazados hacia arriba para no chocar con la barra */}
         <Controls style={{ marginBottom: '80px', border: '1px solid #e5e7eb', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }} showInteractive={false} />
@@ -337,6 +374,12 @@ function Toolbar() {
           onMouseOut={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
         >
           Inyector Histórico
+        </div>
+        <div 
+          onDragStart={(e) => onDragStart(e, 'console')} draggable 
+          style={{ padding: '8px 24px', backgroundColor: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'grab', fontSize: '13px', fontWeight: '500', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', transition: 'all 0.2s' }}
+        >
+          Consola (SQL/Py)
         </div>  
       </div>
     </div>

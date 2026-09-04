@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect , useRef} from 'react';
 import { Handle, Position, useReactFlow } from '@xyflow/react';
 
 // ... (interfaces y timeframeToMs iguales) ...
@@ -18,7 +18,17 @@ export default function ProviderNode({ id, data }: { id: string, data: any }) {
   const [newSymbol, setNewSymbol] = useState('');
   const [newTimeframe, setNewTimeframe] = useState('1m');
 
-  // NUEVO: Sincroniza los mercados con los datos del nodo para que App.tsx pueda leerlos
+  const marketsCleanupRef = useRef(markets);
+  useEffect(() => { marketsCleanupRef.current = markets; }, [markets]);
+
+  // EVENTO DE DESMONTAJE
+  useEffect(() => {
+    return () => {
+      marketsCleanupRef.current.forEach(m => {
+        data.wsSend?.({ action: 'unsubscribe', marketId: m.id });
+      });
+    };
+  }, []); 
   useEffect(() => {
     updateNodeData(id, { markets });
   }, [markets, id, updateNodeData]);

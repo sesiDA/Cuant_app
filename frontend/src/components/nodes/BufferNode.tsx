@@ -30,7 +30,6 @@ export default function BufferNode({ id, data }: { id: string, data: any }) {
     setTables([]); 
   }, [database, id, setEdges]);
 
-  // 2. RECEPCIÓN DE DATOS (SINGLE O BATCH)
   // 2. RECEPCIÓN DE DATOS (SINGLE O BATCH) Y PROPAGACIÓN
   useEffect(() => {
     if (globalPaused || !data?.incomingData) return;
@@ -85,7 +84,13 @@ export default function BufferNode({ id, data }: { id: string, data: any }) {
       setTables(prev => prev.map(t => t.id === data.loadedTable.id ? { ...t, count: data.loadedTable.count } : t));
     }
   }, [data.loadedTable]);
-
+  //5. ESCUCHA DE MUTACIONES EXTERNAS (Desde la Consola)
+  useEffect(() => {
+    if (data.refreshTrigger) {
+      // Si la consola alteró datos, recargamos todas las tablas activas
+      tables.forEach(t => data.wsSend?.({ action: 'buffer_load', tableId: t.id, mode: database }));
+    }
+  }, [data.refreshTrigger]);
   const toggleGlobalPause = () => setGlobalPaused(!globalPaused);
   const togglePause = (tId: string) => setTables(prev => prev.map(t => t.id === tId ? { ...t, paused: !t.paused } : t));
   

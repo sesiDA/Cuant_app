@@ -79,7 +79,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 buffer_manager.clear_table(command.get("tableId"), command.get("mode", "LOCAL_MEM"))
                 continue
                 
-            elif action == "buffer_load": # NUEVO
+            elif action == "buffer_load": 
                 table_id = command.get("tableId")
                 db_mode = command.get("mode", "LOCAL_MEM")
                 
@@ -114,7 +114,22 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "ERROR", "marketId": market_id, "message": str(e)
                     }))
                 continue    
-            
+            # --- COMANDO DE CONSOLA ---
+            if action == "console_execute":
+                node_id = command.get("nodeId")
+                buffer_id = command.get("bufferId") # Añadimos bufferId
+                mode = command.get("mode", "SQL")
+                code = command.get("code", "")
+                
+                result = buffer_manager.execute_console(mode, code)
+                
+                await websocket.send_text(json.dumps({
+                    "type": "CONSOLE_RESULT",
+                    "nodeId": node_id,
+                    "bufferId": buffer_id,
+                    "result": result
+                }))
+                continue
             # --- COMANDOS DE BROKER EXISTENTES ---
             if not broker:
                 await websocket.send_text(json.dumps({"type": "GLOBAL_ERROR", "message": "MT5 no conectado."}))
