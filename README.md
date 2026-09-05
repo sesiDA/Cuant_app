@@ -1,6 +1,6 @@
 # Estructura del Proyecto
-
-quant-platform/ç
+<pre>
+quant-platform/
 ├── README.md         
 ├── .gitignore                     # Archivos que ignorar en los pullrequest de GitHub 
 ├── docker-compose.yml             # Servicio Docker para bases de datos
@@ -55,6 +55,8 @@ quant-platform/ç
         ├── store/                 # Estado global de los pipelines (Zustand/Redux)
         ├── services/              # Cliente API REST y conexión WebSocket con Backend
         └── types/                 # Definiciones de TypeScript para nodos y flujos 
+</pre>
+
 # Logica de nodos
 Los nodos con diferentes colores de conexion significan diferentes cosas:
     -Conexiones azules: Datos que vienen solos por pulso
