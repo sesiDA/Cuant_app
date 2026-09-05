@@ -8,6 +8,8 @@ import ChartNode from './components/nodes/ChartNode';
 import BufferNode from './components/nodes/BufferNode';
 import HistoricalNode from './components/nodes/HistoricalNode';
 import ConsoleNode from './components/nodes/ConsoleNode';
+import MultiplexerNode from './components/nodes/MultiplexerNode';
+import DemultiplexerNode from './components/nodes/DemultiplexerNode';
 
 // --- CONFIGURACIÓN VISUAL DE LOS CABLES ---
 const defaultEdgeStyle = { stroke: '#cbd5e1', strokeWidth: 2 };
@@ -38,7 +40,11 @@ function DeletableEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition,
     </>
   );
 }
-const nodeTypes = { provider: ProviderNode, chart: ChartNode, buffer: BufferNode, historical: HistoricalNode, console: ConsoleNode };
+const nodeTypes = { 
+  provider: ProviderNode, chart: ChartNode, buffer: BufferNode, 
+  historical: HistoricalNode, console: ConsoleNode,
+  multiplexer: MultiplexerNode, demultiplexer: DemultiplexerNode 
+};
 const edgeTypes = { deletable: DeletableEdge };
 
 function FlowCanvas() {
@@ -203,8 +209,8 @@ function FlowCanvas() {
     };
     return () => ws.close();
   }, [setNodes, setEdges]);
-  
-  // BUS DE EVENTOS FRONT-TO-FRONT 
+
+  // --- BUS DE EVENTOS FRONT-TO-FRONT ---
   useEffect(() => {
     const handleForward = (e: Event) => {
       const customEvent = e as CustomEvent;
@@ -212,13 +218,20 @@ function FlowCanvas() {
 
       setEdges(eds => {
         let hasConnections = false;
+        
+        // Identificamos el color y el grosor del cable según el tipo de datos
+        const isMux = payload.dataType === 'multiplexed';
+        const activeColor = isMux ? '#f59e0b' : (payload.dataType === 'accumulated' ? '#8b5cf6' : '#38bdf8');
+        // El grosor base es 3. Si está multiplexado, es proporcional a la cantidad de cables.
+        const baseThickness = isMux ? Math.max(4, (payload.multiplexCount || 1) * 2) : 3;
+
         const updatedEdges = eds.map(edge => {
           if (edge.sourceHandle === sourceHandle) {
             hasConnections = true;
-            // Adaptamos el color según el tipo de dato que se está propagando
-            const activeColor = payload.dataType === 'accumulated' ? '#8b5cf6' : '#38bdf8';
             return { 
-              ...edge, animated: true, style: { stroke: activeColor, strokeWidth: 3 }, 
+              ...edge, 
+              animated: true, 
+              style: { stroke: activeColor, strokeWidth: baseThickness + 1 }, // Ligeramente más gordo al animarse
               markerEnd: { type: MarkerType.ArrowClosed, color: activeColor } 
             };
           }
@@ -229,18 +242,17 @@ function FlowCanvas() {
           setNodes(nds => nds.map(n => {
             const incomingEdge = updatedEdges.find(ce => ce.target === n.id && ce.sourceHandle === sourceHandle);
             if (incomingEdge) {
-              // Preparamos el payload con el handle de destino correcto
               const standardPayload = { ...payload, targetHandle: incomingEdge.targetHandle };
               return { ...n, data: { ...n.data, incomingData: standardPayload } };
             }
             return n;
           }));
 
-          // Apagamos la animación del cable al terminar
+          // Restauramos la animación, PERO CONSERVAMOS EL GROSOR EN REPOSO
           setTimeout(() => {
             setEdges(currentEdges => currentEdges.map(edge => 
               edge.sourceHandle === sourceHandle 
-                ? { ...edge, animated: false, style: defaultEdgeStyle, markerEnd: defaultMarker } 
+                ? { ...edge, animated: false, style: { stroke: '#cbd5e1', strokeWidth: baseThickness }, markerEnd: { type: MarkerType.ArrowClosed, color: '#cbd5e1' } } 
                 : edge
             ));
           }, 2000);
@@ -358,7 +370,6 @@ function Toolbar() {
         >
           Visualizador de Gráfico
         </div>
-
         <div 
           onDragStart={(e) => onDragStart(e, 'buffer')} draggable 
           style={{ padding: '8px 24px', backgroundColor: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'grab', fontSize: '13px', fontWeight: '500', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', transition: 'all 0.2s' }}
@@ -378,9 +389,27 @@ function Toolbar() {
         <div 
           onDragStart={(e) => onDragStart(e, 'console')} draggable 
           style={{ padding: '8px 24px', backgroundColor: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'grab', fontSize: '13px', fontWeight: '500', boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)', transition: 'all 0.2s' }}
+          onMouseOver={(e) => e.currentTarget.style.borderColor = '#9ca3af'}
+          onMouseOut={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}        
         >
           Consola (SQL/Py)
-        </div>  
+        </div> 
+        <div 
+          onDragStart={(e) => onDragStart(e, 'multiplexer')} draggable 
+          style={{ padding: '8px 24px', backgroundColor: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'grab', fontSize: '13px', fontWeight: '500', transition: 'all 0.2s' }}
+          onMouseOver={(e) => e.currentTarget.style.borderColor = '#9ca3af'}
+          onMouseOut={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+        >
+          MUX (Agrupar)
+        </div>
+        <div 
+          onDragStart={(e) => onDragStart(e, 'demultiplexer')} draggable 
+          style={{ padding: '8px 24px', backgroundColor: '#ffffff', color: '#111827', border: '1px solid #e5e7eb', borderRadius: '8px', cursor: 'grab', fontSize: '13px', fontWeight: '500', transition: 'all 0.2s' }}
+          onMouseOver={(e) => e.currentTarget.style.borderColor = '#9ca3af'}
+          onMouseOut={(e) => e.currentTarget.style.borderColor = '#e5e7eb'}
+        >
+          DEMUX (Separar)
+        </div> 
       </div>
     </div>
   );

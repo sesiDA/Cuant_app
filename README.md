@@ -64,13 +64,13 @@ Los nodos con diferentes colores de conexion significan diferentes cosas:
         -Si tiene un circulo negro es especificamente int/out de consola
 
 # TODO List
-    -[HECHO] El buffer sigue recibiendo datos de un nodo que ya ha sido desconectado 
-    -[HECHO] Cuando se elimina una tabla o unas entradas con consola no se ve reflejado en el buffer
-    -[HECHO] Los nodos del buffer o de la consola estan al reves (y los de la consola estan del color equivocado)
-    -[HECHO]Los datos de pandas colapsan porque los objetos no son serializables bajo JSON
-    -[HECHO]Respuesta del output desconectada del sistema de edges
-    -[HECHO] La consola envía instrucciones cuando se cambia de modo despues de la primera instrucción
-    
-    -Hacer nodos auxiliares: Multiplexor, Decodificador, Clock
+    -Arregla protocolo de comunicación estandarizado
+        -Ahora el multiplexor y decodificador que antes funcionaban con el nuevo protocolo ya no
+        -El buffer con el nuevo protocolo lee a la consola como una tabla (debería excluir esto)
+    -Hacer Clock
     -Hacer preprocesador de datos 
     -Implementar otras APIS de Retrieving de datos y mirar si lee los timeframes
+
+# Proximo commit
+    -Implementados el DECODER y EL ENCODER
+    -Instaurado protocolo de comunicación estandarizado con onda de configuración
